@@ -34,8 +34,9 @@ from .chain import ChainBuilder
 from .composer import Composer
 from .corpus import Corpus
 from .engine import EngineState, run as engine_run
+from .pruner import Pruner
 from .scorer import Scorer
-from .target import HttpTarget, OpenAITarget, Target
+from .target import HttpTarget, OpenAITarget, SchemaTarget, Target
 
 logger = logging.getLogger(__name__)
 
@@ -59,7 +60,7 @@ class LLMConfig(BaseModel):
 
 
 class TargetConfig(BaseModel):
-    type: str = "openai"                    # "openai" | "http"
+    type: str = "openai"                    # "openai" | "http" | "schema"
     endpoint: str = "https://api.openai.com/v1"
     model: Optional[str] = None
     api_key: Optional[str] = None
@@ -72,10 +73,36 @@ class TargetConfig(BaseModel):
     headers: Optional[dict[str, str]] = None
     timeout_s: float = 30.0
 
+    # SchemaTarget fields (control-plane / enum attack)
+    trigger: str = "Respond according to the provided schema."
+
     def resolve_key(self) -> str:
         if self.api_key:
             return self.api_key
         return os.environ.get("OPENAI_API_KEY", "nokey")
+
+
+class PrunerConfig(BaseModel):
+    """
+    Optional TAP-style relevance pruner.
+
+    Omit from campaign.yaml to disable pruning entirely.
+    Defaults to the scorer's endpoint/key/model if only `model` is specified.
+
+    Example:
+        pruner:
+          model: gpt-4o-mini    # uses scorer endpoint + key if not overridden
+    """
+    endpoint: Optional[str] = None     # defaults to scorer.endpoint
+    model: Optional[str] = None        # defaults to scorer.model
+    api_key: Optional[str] = None      # defaults to scorer.api_key
+
+    def resolve(self, scorer: "LLMConfig") -> tuple[str, str, str]:
+        """Return (endpoint, api_key, model) falling back to scorer config."""
+        endpoint = self.endpoint or scorer.endpoint
+        model    = self.model    or scorer.model
+        key      = self.api_key  or scorer.resolve_key()
+        return endpoint, key, model
 
 
 class CampaignConfig(BaseModel):
@@ -90,6 +117,7 @@ class CampaignConfig(BaseModel):
     composer: LLMConfig
     scorer: LLMConfig
     seed_generator: Optional[LLMConfig] = None  # defaults to composer if omitted
+    pruner: Optional[PrunerConfig] = None       # omit to disable relevance pruning
 
     # Campaign behaviour
     max_iterations: int = 500
@@ -105,7 +133,10 @@ class CampaignConfig(BaseModel):
         default_factory=lambda: ["technique", "tactic", "encoding", "obfuscation", "structural", "translation"]
     )
     languages: list[str] = Field(
-        default_factory=lambda: ["Russian", "Chinese", "Arabic"]
+        default_factory=lambda: [
+            "Russian", "Chinese", "Arabic", "Thai",
+            "Zulu", "Welsh", "Hmong", "Scots Gaelic",
+        ]
     )
 
     # Output
@@ -227,8 +258,19 @@ def build_target(config: CampaignConfig) -> Target:
             headers=tc.headers,
             timeout_s=tc.timeout_s,
         )
+    elif tc.type == "schema":
+        if tc.model is None:
+            raise ValueError("target.model is required for type=schema")
+        return SchemaTarget(
+            endpoint=tc.endpoint,
+            model=tc.model,
+            api_key=tc.resolve_key(),
+            system_prompt=tc.system_prompt,
+            trigger=tc.trigger,
+            temperature=tc.temperature,
+        )
     else:
-        raise ValueError(f"Unknown target type: {tc.type!r}. Use 'openai' or 'http'.")
+        raise ValueError(f"Unknown target type: {tc.type!r}. Use 'openai', 'http', or 'schema'.")
 
 
 # ---------------------------------------------------------------------------
@@ -274,6 +316,7 @@ async def _checkpoint(
             "phase":            state.phase,
             "budget_spent_usd": state.budget_spent_usd,
             "crashes_found":    state.crashes_found,
+            "pruned_count":     state.pruned_count,
         }, indent=2)
     )
 
@@ -337,6 +380,7 @@ def load_checkpoint(output_dir: Path, config: CampaignConfig) -> tuple[Corpus, C
         state.phase            = saved.get("phase", "phase1")
         state.budget_spent_usd = saved.get("budget_spent_usd", 0.0)
         state.crashes_found    = saved.get("crashes_found", 0)
+        state.pruned_count     = saved.get("pruned_count", 0)
 
     logger.info(
         "Resumed from checkpoint: iter=%d, phase=%s, corpus=%d entries",
@@ -378,6 +422,11 @@ async def run_campaign(config: CampaignConfig, resume: bool = False) -> EngineSt
         api_key=config.scorer.resolve_key(),
         model=config.scorer.model,
     )
+    pruner_obj: Optional[Pruner] = None
+    if config.pruner is not None:
+        ep, key, mdl = config.pruner.resolve(config.scorer)
+        pruner_obj = Pruner(endpoint=ep, api_key=key, model=mdl)
+        logger.info("Relevance pruner enabled (model=%s)", mdl)
 
     # Corpus + chain builder (fresh or resumed)
     if resume and (config.output_dir / "state.json").exists():
@@ -401,6 +450,7 @@ async def run_campaign(config: CampaignConfig, resume: bool = False) -> EngineSt
         target=target,
         state=state,
         on_checkpoint=on_checkpoint,
+        pruner=pruner_obj,
     )
 
     # Final checkpoint + summary

@@ -52,6 +52,7 @@ from transforms import TRANSFORMS  # type: ignore[import]
 from .chain import ChainBuilder
 from .composer import Composer
 from .corpus import Chain, Corpus, CorpusEntry, make_entry
+from .pruner import Pruner
 from .scorer import Scorer, ScoreResult
 from .target import Target
 
@@ -138,6 +139,7 @@ class EngineState:
     phase:              str   = "phase1"
     budget_spent_usd:   float = 0.0
     crashes_found:      int   = 0
+    pruned_count:       int   = 0
 
 
 # ---------------------------------------------------------------------------
@@ -154,12 +156,15 @@ async def run(
     target: Target,
     state: Optional[EngineState] = None,
     on_checkpoint: Optional[callable] = None,
+    pruner: Optional[Pruner] = None,
 ) -> EngineState:
     """
     Run the full fuzzing campaign. Returns final EngineState.
 
     on_checkpoint: async callable(corpus, chain_builder, state) — called every
                    checkpoint_interval iterations and on clean exit.
+    pruner:        optional Pruner that gates mutations before target calls.
+                   Pass None (default) to disable.
     """
     if state is None:
         state = EngineState()
@@ -173,16 +178,16 @@ async def run(
         if state.phase == "phase1":
             await _run_phase1(
                 config, corpus, chain_builder, composer, scorer, target,
-                state, recent_results, live, on_checkpoint,
+                state, recent_results, live, on_checkpoint, pruner,
             )
             state.phase = "phase2"
 
         # ---------------------------------------------------------------
-        # Phase 2/3 — interleaved havoc + LLM-guided (stub for phase 3)
+        # Phase 2/3 — interleaved havoc + LLM-guided
         # ---------------------------------------------------------------
         await _run_phase2(
             config, corpus, chain_builder, composer, scorer, target,
-            state, recent_results, live, on_checkpoint,
+            state, recent_results, live, on_checkpoint, pruner,
         )
 
     # Final checkpoint
@@ -199,7 +204,7 @@ async def run(
 
 async def _run_phase1(
     config, corpus, chain_builder, composer, scorer, target,
-    state, recent_results, live, on_checkpoint,
+    state, recent_results, live, on_checkpoint, pruner=None,
 ):
     """
     Exhaust all single-transform mutations across all seeds.
@@ -233,6 +238,14 @@ async def _run_phase1(
                 if mutated is None:
                     return
                 phase_tag = "phase1_strategy"
+
+            # Relevance prune before hitting the (expensive) target
+            if pruner is not None:
+                keep, prune_cost = await pruner.is_relevant(config.seed_intent, mutated)
+                state.budget_spent_usd += prune_cost
+                if not keep:
+                    state.pruned_count += 1
+                    return
 
             # Send to target + score
             try:
@@ -294,7 +307,7 @@ async def _run_phase1(
 
 async def _run_phase2(
     config, corpus, chain_builder, composer, scorer, target,
-    state, recent_results, live, on_checkpoint,
+    state, recent_results, live, on_checkpoint, pruner=None,
 ):
     """
     Random havoc (phase 2) interleaved with LLM-guided (phase 3).
@@ -364,6 +377,17 @@ async def _run_phase2(
                 state.non_novel_streak += 1
                 state.iteration += 1
                 return
+
+            # Relevance prune before hitting the (expensive) target
+            if pruner is not None:
+                keep, prune_cost = await pruner.is_relevant(config.seed_intent, mutated)
+                state.budget_spent_usd += prune_cost
+                if not keep:
+                    state.pruned_count += 1
+                    chain_builder.update(chain, admitted=False, crashed=False)
+                    state.non_novel_streak += 1
+                    state.iteration += 1
+                    return
 
             # Target + scorer
             try:
@@ -490,7 +514,8 @@ def _render_display(config, state: EngineState, recent: list[IterResult]) -> Tab
         f"[dim]({budget_pct:.0f}%)[/]",
         f"crashes [bold {'red' if state.crashes_found else 'white'}]"
         f"{state.crashes_found}[/]  "
-        f"streak [bold]{state.non_novel_streak}[/]/{config.plateau_threshold}",
+        f"streak [bold]{state.non_novel_streak}[/]/{config.plateau_threshold}  "
+        f"[dim]pruned {state.pruned_count}[/]",
     )
     outer.add_row(header)
     outer.add_row("")

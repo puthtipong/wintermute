@@ -75,6 +75,16 @@ target:
 #     Authorization: "Bearer mytoken"
 #   timeout_s: 30.0
 
+# Schema / control-plane attack target (arXiv:2503.24191 — 96.2% ASR):
+# Payload goes in a JSON Schema enum value; the user message is a benign decoy.
+# Safety classifiers audit the prompt but not the schema — a structural blind spot.
+# target:
+#   type: schema
+#   endpoint: https://api.openai.com/v1
+#   model: gpt-4o
+#   trigger: "Complete the task."
+#   system_prompt: "You are a helpful assistant."
+
 # ---------------------------------------------------------------------------
 # LLM infrastructure (composer, scorer, seed_generator)
 # ---------------------------------------------------------------------------
@@ -98,6 +108,11 @@ scorer:
 # Defaults to composer settings if omitted.
 # seed_generator:
 #   endpoint: https://api.openai.com/v1
+#   model: gpt-4o-mini
+
+# Pruner: TAP-style relevance gate (drops off-topic mutations before target call).
+# Defaults to scorer model/endpoint if only model is specified. Omit to disable.
+# pruner:
 #   model: gpt-4o-mini
 
 # ---------------------------------------------------------------------------
@@ -137,6 +152,11 @@ languages:
   - Russian
   - Chinese
   - Arabic
+  - Thai
+  - Zulu
+  - Welsh
+  - Hmong
+  - "Scots Gaelic"
 
 # ---------------------------------------------------------------------------
 # Output
