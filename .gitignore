@@ -1,0 +1,35 @@
+# Python
+__pycache__/
+*.py[cod]
+*.pyo
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+
+# PyRIT database
+*.db
+pyrit_memory/
+
+# Run outputs (contain potentially sensitive generated prompts)
+runs/
+
+# Environment / secrets
+.env
+*.env
+*.key
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*~
+
+# macOS
+.DS_Store
