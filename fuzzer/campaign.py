@@ -28,8 +28,6 @@ import openai
 import yaml
 from pydantic import BaseModel, Field, model_validator
 
-from pyrit.setup import IN_MEMORY, initialize_pyrit_async  # type: ignore[import]
-
 from .chain import ChainBuilder
 from .composer import Composer
 from .corpus import Corpus
@@ -398,14 +396,11 @@ async def run_campaign(config: CampaignConfig, resume: bool = False) -> EngineSt
     """
     Full campaign runner. Called by fuzz.py after loading config.
 
-    1. Initialise PyRIT (for deterministic converters)
-    2. Generate seeds if not provided
-    3. Build runtime objects
-    4. Run engine
-    5. Write final checkpoint + summary
+    1. Generate seeds if not provided
+    2. Build runtime objects
+    3. Run engine
+    4. Write final checkpoint + summary
     """
-    await initialize_pyrit_async(memory_db_type=IN_MEMORY)
-
     # Seed generation
     if not config.seed_prompts:
         config.seed_prompts = await generate_seeds(config)

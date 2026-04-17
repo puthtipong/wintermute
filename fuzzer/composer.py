@@ -5,7 +5,7 @@ Responsibilities:
   1. Build the composer system prompt from a Chain (strategies + tool_spec),
      the seed intent, and optional target context.
   2. Call the OpenAI API to generate the mutated prompt.
-  3. Parse [ANNOTATION_ID:text] markers in the output and apply the real PyRIT
+  3. Parse [ANNOTATION_ID:text] markers in the output and apply the real
      deterministic converters (base64, rot13, leet, etc.) in place.
 
 Annotation format
@@ -490,7 +490,8 @@ async def _apply_annotations(text: str, tool_spec: list[str]) -> Optional[str]:
             encoded = await t.apply_async(inner_text, llm=None, context="")
         except Exception as exc:
             logger.debug(
-                "Converter %r failed on %r: %s — discarding", transform_key, inner_text[:40], exc
+                "Converter %r failed on %r: %s — discarding",
+                transform_key, inner_text[:40], exc,
             )
             return None
 

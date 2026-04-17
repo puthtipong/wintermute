@@ -94,14 +94,14 @@ target:
 # Tip: gpt-4o gives better annotation reliability; gpt-4o-mini is cheaper.
 composer:
   endpoint: https://api.openai.com/v1
-  model: gpt-4o
+  model: gpt-5
   # api_key: sk-...
 
 # Scorer: evaluates compliance of target responses (0-3).
 # Can be a cheaper model — it's rubric-following, not creative generation.
 scorer:
   endpoint: https://api.openai.com/v1
-  model: gpt-4o-mini
+  model: gpt-5-nano
   # api_key: sk-...
 
 # Seed generator: produces seed prompts when seed_prompts is empty.
