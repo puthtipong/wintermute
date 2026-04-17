@@ -201,6 +201,7 @@ async def generate_seeds(config: CampaignConfig) -> list[str]:
             ],
             response_format={"type": "json_object"},
             temperature=1.0,
+            timeout=30,
         )
         raw = resp.choices[0].message.content or "[]"
         # The model returns {"seeds": [...]} or just [...] — handle both
@@ -403,7 +404,9 @@ async def run_campaign(config: CampaignConfig, resume: bool = False) -> EngineSt
     """
     # Seed generation
     if not config.seed_prompts:
+        print(f"Generating {config.num_seeds} seeds via {config.seed_generator.model}...", flush=True)
         config.seed_prompts = await generate_seeds(config)
+        print(f"Seeds ready: {len(config.seed_prompts)}", flush=True)
 
     # Build runtime objects
     target       = build_target(config)

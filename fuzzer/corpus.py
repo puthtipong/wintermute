@@ -152,9 +152,13 @@ class Corpus:
         """
         Attempt to add an entry. Returns True if admitted (novel), False if
         rejected (duplicate chain or non-novel score/category).
+
+        Crashes (score=3) bypass both the chain-dedup and novelty checks —
+        every crash is worth preserving regardless of whether the same chain
+        or category was seen before (different seeds produce different prompts).
         """
         async with self._lock:
-            if entry.chain.seen_key() in self._seen:
+            if entry.score.score < 3 and entry.chain.seen_key() in self._seen:
                 logger.debug("Duplicate chain — skipping %s", entry.entry_id[:8])
                 return False
             if not self._is_novel(entry):
@@ -170,6 +174,8 @@ class Corpus:
         """Novelty check — called under lock."""
         if entry.score.score == 0:
             return False
+        if entry.score.score == 3:
+            return True  # crashes are always novel — save every one
         if entry.score.score > self._max_score:
             return True
         return (entry.score.score, entry.score.category) not in self._index
