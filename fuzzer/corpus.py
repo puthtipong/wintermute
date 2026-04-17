@@ -174,29 +174,16 @@ class Corpus:
         """
         Novelty check — called under lock.
 
-        Admission criteria (any one is sufficient):
-          - score == 3 (crash)        → always novel, save everything
-          - score > current max        → new high watermark, always admit
-          - new (score, category) pair → first time we've seen this failure mode
-          - same category, better chain depth → shallower path to same outcome
+        Rule: any unique chain that produces score > 0 is worth keeping.
+        Chain deduplication (seen_key) in add() prevents true duplicates.
+        Corpus size is managed separately by cull().
+
+        Score=0 is never admitted — no useful signal.
+        Score=3 (crash) always admitted — every crash is worth saving.
+        Score=1/2 admitted if the chain hasn't been seen before (enforced
+        by the seen_key check in add() before this is even called).
         """
-        if entry.score.score == 0:
-            return False
-        if entry.score.score == 3:
-            return True  # crashes are always novel — save every one
-        if entry.score.score > self._max_score:
-            return True
-
-        sc_key = (entry.score.score, entry.score.category)
-        if sc_key not in self._index:
-            return True  # first time seeing this (score, category)
-
-        # Same score+category already exists — admit only if this entry is
-        # shallower than the current shallowest for this bucket.
-        # This keeps the corpus from stagnating while still filtering pure
-        # duplicates that add no new information.
-        shallowest = min(e.depth for e in self._index[sc_key])
-        return entry.depth < shallowest
+        return entry.score.score > 0
 
     def _admit(self, entry: CorpusEntry) -> None:
         """Unconditionally insert — must be called under lock."""

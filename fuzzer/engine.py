@@ -464,7 +464,7 @@ async def _run_phase2(
             # Periodic maintenance
             if state.iteration % config.checkpoint_interval == 0 and on_checkpoint:
                 await on_checkpoint(corpus, chain_builder, state)
-            if state.iteration % 100 == 0:
+            if state.iteration % 50 == 0:
                 await corpus.cull()
 
     # Main loop: keep spawning workers until stop condition
