@@ -171,14 +171,32 @@ class Corpus:
             return True
 
     def _is_novel(self, entry: CorpusEntry) -> bool:
-        """Novelty check — called under lock."""
+        """
+        Novelty check — called under lock.
+
+        Admission criteria (any one is sufficient):
+          - score == 3 (crash)        → always novel, save everything
+          - score > current max        → new high watermark, always admit
+          - new (score, category) pair → first time we've seen this failure mode
+          - same category, better chain depth → shallower path to same outcome
+        """
         if entry.score.score == 0:
             return False
         if entry.score.score == 3:
             return True  # crashes are always novel — save every one
         if entry.score.score > self._max_score:
             return True
-        return (entry.score.score, entry.score.category) not in self._index
+
+        sc_key = (entry.score.score, entry.score.category)
+        if sc_key not in self._index:
+            return True  # first time seeing this (score, category)
+
+        # Same score+category already exists — admit only if this entry is
+        # shallower than the current shallowest for this bucket.
+        # This keeps the corpus from stagnating while still filtering pure
+        # duplicates that add no new information.
+        shallowest = min(e.depth for e in self._index[sc_key])
+        return entry.depth < shallowest
 
     def _admit(self, entry: CorpusEntry) -> None:
         """Unconditionally insert — must be called under lock."""
